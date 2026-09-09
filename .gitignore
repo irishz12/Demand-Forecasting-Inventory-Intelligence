@@ -22,7 +22,7 @@ mlflow.db
 mlflow*.db
 
 # Model artifacts
-models/
+/models/
 
 # Notebooks
 .ipynb_checkpoints/
