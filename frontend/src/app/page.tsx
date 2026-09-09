@@ -53,9 +53,7 @@ type ForecastResponse = {
   };
 };
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ||
-  "http://localhost:8000";
+const API_BASE_URL = "";
 
 export default function Home() {
   const [storeId, setStoreId] = useState("CA_1");
@@ -72,7 +70,7 @@ export default function Home() {
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/forecast`, {
+      const response = await fetch(`${API_BASE_URL}/api/forecast`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
