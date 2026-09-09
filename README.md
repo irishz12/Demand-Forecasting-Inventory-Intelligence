@@ -1,30 +1,51 @@
 # Demand Forecasting & Inventory Intelligence
 
-An end-to-end machine learning system that translates retail demand forecasts into operational inventory replenishment recommendations. Built with XGBoost, FastAPI, Next.js, Docker, and MLflow on Walmart M5 historical retail data, the system evaluates the top 50 high-volume store-product series and automates safe model deployment through an auditable champion/challenger quality gate.
+An end-to-end machine learning system that translates retail demand forecasts into operational inventory replenishment recommendations. Built with **XGBoost**, **MLflow**, **FastAPI**, **Docker**, **AWS EC2**, and **Next.js** on Walmart M5 retail data, the system models the top 50 high-volume store-product series and automates safe model deployment through an auditable champion/challenger quality gate.
 
-**Live Demo:** [https://demand-forecasting-inventory-intell.vercel.app/](https://demand-forecasting-inventory-intell.vercel.app/)<br/>
-**Production API:** `http://3.80.207.155:8000` (AWS EC2)
+[**View Live Operations Dashboard**](https://demand-forecasting-inventory-intell.vercel.app/)
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-Forecasting-EB4223?style=flat)
+![MLflow](https://img.shields.io/badge/MLflow-Registry%20%26%20Tracking-0194E2?style=flat&logo=mlflow&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Serving-009688?style=flat&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=flat&logo=docker&logoColor=white)
+![AWS EC2](https://img.shields.io/badge/AWS-EC2%20(ARM64)-FF9900?style=flat&logo=amazonec2&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16%20App%20Router-000000?style=flat&logo=next.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-CSS%20v4-06B6D4?style=flat&logo=tailwindcss&logoColor=white)
+![SHAP](https://img.shields.io/badge/SHAP-Explainability-brightgreen?style=flat)
+
+---
+
+## Results at a Glance
+
+| Metric | Outcome | Context |
+| :--- | :---: | :--- |
+| **Forecasting Accuracy (WAPE)** | **22.55%** | **22.90% relative improvement** vs. strongest baseline (Moving Average, 29.25% WAPE) on 28-day holdout. *(1-step teacher-forced validation)* |
+| **Stockout Incidence** | **3.50%** | Down from **9.00%** (**61.1% relative reduction**) in 28-day decision-time simulation. |
+| **Fulfillment Service Level** | **96.50%** | Up from **91.00%** (**+5.50 percentage points**) in 28-day decision-time simulation. |
+| **Modeled Inventory Cost** | **-16.00%** | Simulation cost decreased from **14.13 to 11.87** under asymmetric holding vs. stockout penalties. |
+
+> [!NOTE]
+> **Evaluation Distinction:** The 22.55% WAPE reflects 1-step teacher-forced validation on historical actuals across the 28-day holdout. Multi-step recursive forecasts generated in production accumulate autoregressive variance across 7, 14, and 30-day horizons. Inventory simulation metrics reflect an offline periodic-review policy simulation rather than empirical post-deployment store savings.
 
 ---
 
 ## Problem
 
-Retail inventory managers face an asymmetric operational trade-off:
+Retail inventory managers face an operational tension: under-ordering causes stockouts and lost revenue, while over-ordering ties up working capital in holding costs, strains physical warehouse space, and increases obsolescence risk.
 
-1. **Under-ordering (Stockouts):** Directly causes unrecoverable lost revenue, backorders, and damaged customer loyalty.
-2. **Over-ordering (Excess Stock):** Ties up working capital in holding costs, strains physical warehouse capacity, and increases perishable spoilage or obsolescence risk.
-
-Traditional retail heuristics—such as naive repeat-last-day rules or simple moving averages—consistently lag behind demand shifts because daily SKU sales exhibit non-stationary seasonality, day-of-week surges, promotional events, and SNAP subsidy schedules. A production forecasting system must capture multivariate temporal interactions while translating statistical demand predictions into net replenishment recommendations that protect service levels.
+Simple forecasting heuristics can struggle to capture changing demand patterns involving recent demand, seasonality, calendar effects, and promotional/SNAP signals. This project implements a machine learning system that captures these temporal patterns with XGBoost, benchmarks performance against standard time-series baselines, and translates statistical demand forecasts directly into safety-stock-buffered replenishment recommendations.
 
 ---
 
 ## Solution
 
-The system addresses this challenge through a closed-loop decision workflow:
+The system implements a closed-loop decision workflow:
 
 - **Time-Series Feature Engineering:** Generates autoregressive lags, rolling window statistics, calendar attributes, selling prices, and state-level SNAP subsidy indicators without lookahead leakage.
-- **Gradient Boosted Forecasting:** Trains an XGBoost regression model on a strictly temporal train/validation split.
-- **Recursive Multi-Step Inference:** Dynamically rolls predictions forward over configurable planning horizons (7, 14, or 30 days), dynamically updating lag and rolling features while querying known calendar holiday events and SNAP dates.
+- **Gradient Boosted Forecasting:** Trains an XGBoost regression model on a strictly chronological train/validation split.
+- **Recursive Multi-Step Inference:** Rolls predictions forward over configurable planning horizons (7, 14, or 30 days), dynamically updating lag and rolling features while querying known calendar holiday events and SNAP dates.
 - **Inventory Recommendation Layer:** Converts point forecasts into net reorder recommendations using a safety stock buffer configured to balance stockout risk against inventory holding costs.
 - **Full-Stack Serving & Observability:** Serves predictions via a high-performance FastAPI backend containerized with Docker on AWS EC2, accessed through an interactive Next.js operations dashboard.
 
@@ -36,30 +57,28 @@ The system addresses this challenge through a closed-loop decision workflow:
 
 All models were evaluated on the final 28-day validation window (2016-03-28 through 2016-04-24, 1,400 observations across the 50 series) using 1-step teacher-forced evaluation:
 
-| Model | MAE | RMSE | WAPE | Relative WAPE vs. Best Baseline |
-| :--- | :---: | :---: | :---: | :---: |
-| **Naive (Lag 1)** | 12.1736 | 19.0373 | 31.6437% | +8.20% |
-| **Seasonal Naive (Lag 7)** | 11.6086 | 18.0619 | 30.1751% | +3.18% |
-| **Moving Average (7-Day Rolling Mean)** | 11.2509 | 16.4727 | 29.2454% | Baseline (0.00%) |
-| **XGBoost Regressor** | **8.6744** | **12.6023** | **22.5481%** | **-22.90%** |
+| Model | MAE | RMSE | WAPE | Relative WAPE vs. Best Baseline | Benchmark Context |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Naive (Lag 1)** | 12.17 | 19.04 | 31.64% | +8.20% | Prior-day persistence baseline |
+| **Seasonal Naive (Lag 7)** | 11.61 | 18.06 | 30.18% | +3.18% | Captures weekly cyclicality |
+| **Moving Average (7-Day Mean)** | 11.25 | 16.47 | 29.25% | Baseline (0.00%) | **Strongest baseline**; smooths noise |
+| **XGBoost Regressor** | **8.67** | **12.60** | **22.55%** | **-22.90%** | **Primary production model** |
 
 $$\text{Relative WAPE Improvement} = \frac{29.2454\% - 22.5481\%}{29.2454\%} = \mathbf{22.90\%}$$
 
-> [!NOTE]
-> **Accuracy Caveat:** The 22.55% WAPE reflects 1-step teacher-forced validation on historical actuals. Multi-step recursive forecasts generated in production accumulate error over 7, 14, and 30-day horizons.
+*Exact holdout values from `reports/baseline_results.csv`: Naive MAE 12.1736, RMSE 19.0373, WAPE 31.6437%; Seasonal Naive MAE 11.6086, RMSE 18.0619, WAPE 30.1751%; Moving Average MAE 11.2509, RMSE 16.4727, WAPE 29.2454%; XGBoost MAE 8.6744, RMSE 12.6023, WAPE 22.5481%.*
 
 ### 2. Decision-Time Inventory Simulation (28-Day Window)
 
 To evaluate operational impact, a closed-loop periodic-review simulation was executed across all 50 series over the 28-day validation period, comparing a 7-day Moving Average heuristic against the XGBoost forecast-driven policy:
 
-| Simulation Metric | Baseline Strategy (7-day MA) | Forecast-Driven Strategy (XGBoost) | Operational Impact |
-| :--- | :---: | :---: | :--- |
-| **Stockout Rate** | 9.00% | **3.50%** | **-5.50 pp** (61.1% relative reduction) |
-| **Service Level** | 91.00% | **96.50%** | **+5.50 pp** service level improvement |
-| **Average Excess Inventory** | **52.61 units** | 61.52 units | +8.91 units strategic buffer |
-| **Inventory-Related Cost** | 14.13 | **11.87** | **-16.00%** net cost reduction |
+| Strategy | Stockout Rate | Service Level | Avg. Excess Inventory | Modeled Inventory Cost |
+| :--- | :---: | :---: | :---: | :---: |
+| **7-Day Moving Average Baseline** | 9.00% | 91.00% | 52.61 units | 14.13 |
+| **XGBoost Forecast-Driven Policy** | **3.50%** | **96.50%** | 61.52 units | **11.87** |
+| **Operational Impact** | **-5.50 pp** (61.1% rel. reduction) | **+5.50 pp** improvement | +8.91 units strategic buffer | **-16.00%** net cost reduction |
 
-*Simulation parameters: 7-day review cycle, 20% safety stock buffer, unit holding cost = 0.10/day, unit stockout penalty = 2.00/unit.*
+*Simulation parameters: 7-day review cycle, 20% safety stock buffer, unit holding cost = 0.10/day, unit stockout penalty = 2.00/unit. Output logged in `reports/inventory_simulation_decision_time.csv`.*
 
 ---
 
@@ -98,9 +117,9 @@ flowchart TD
 ### Production Request Flow
 
 1. The planner selects a Store, Product, Available Inventory, and Planning Horizon (7, 14, or 30 days) in the Next.js UI.
-2. The browser dispatches a `POST` request to the local route `/api/forecast`.
-3. The Next.js server-side proxy reads `process.env.BACKEND_API_URL` and securely forwards the payload to the FastAPI backend on AWS EC2 (`http://3.80.207.155:8000/forecast`), preventing browser CORS issues and shielding backend infrastructure.
-4. FastAPI executes cached recursive inference, applies safety stock calculations, and returns structured daily predictions and inventory recommendations.
+2. The browser dispatches a `POST` request to the Next.js server-side route `/api/forecast`.
+3. The server-side proxy reads `process.env.BACKEND_API_URL` and forwards the payload to the FastAPI backend on AWS EC2, shielding internal infrastructure and preventing browser CORS constraints.
+4. FastAPI executes cached recursive inference, applies safety stock calculations, and returns structured daily predictions and replenishment recommendations.
 
 ---
 
@@ -108,12 +127,12 @@ flowchart TD
 
 The project utilizes the [Kaggle M5 Forecasting – Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) benchmark, consisting of hierarchical retail sales data from Walmart across three US states (California, Texas, Wisconsin):
 
-- `calendar.csv`: Contains calendar dates, day-of-week, event/holiday names, and SNAP allowance flags per state (1,969 total days covering 2011-01-29 through 2016-06-19).
-- `sales_train_validation.csv`: Daily unit sales per store-item combination.
-- `sell_prices.csv`: Weekly store- and item-level selling prices.
+- `calendar.csv`: Contains calendar dates, day-of-week, event/holiday names, and SNAP allowance flags per state (1,969 total days covering 2011-01-29 through 2016-06-19). Tracked in git for reproducible calendar lookups.
+- `sales_train_validation.csv`: Daily unit sales per store-item combination (gitignored, ~101 MB).
+- `sell_prices.csv`: Weekly store- and item-level selling prices (gitignored, ~143 MB).
 
 ### MVP Scope & Selection
-- The full M5 dataset contains **58,327,370 rows** across 30,490 series.
+- The complete M5 dataset contains **58,327,370 rows** across 30,490 series.
 - **Top 50 Series Scope:** To establish a reproducible, computationally tractable, and production-tested MVP, the modeling pipeline isolates the **top 50 store-item series** ranked by total unit sales volume.
 - **Leakage Prevention:** Top-series cohort ranking is calculated strictly on training-period observations prior to the validation cutoff (`date < 2016-03-28`), preventing validation-window information from biasing series selection.
 - The modeled dataset spans **94,250 rows and 27 columns** (2011-02-26 through 2016-04-24) after accommodating maximum lag calculation windows.
@@ -201,7 +220,7 @@ The decision-time periodic-review simulation models four consecutive 7-day revie
 - **Stockout Rate:** Reduced from **9.00% to 3.50%** (a 61.1% relative reduction).
 - **Service Level:** Increased from **91.00% to 96.50%** (+5.50 percentage points).
 - **Average Excess Inventory:** Increased moderately from 52.61 to 61.52 units (+8.91 units) as the model proactively buffers ahead of anticipated weekend and event demand spikes.
-- **Net Inventory Cost:** Decreased from **14.13 to 11.87** (a **16.00% net cost reduction**) due to the 20:1 asymmetric penalty ratio of stockouts versus inventory holding.
+- **Net Modeled Inventory Cost:** Decreased from **14.13 to 11.87** (a **16.00% net cost reduction**) due to the 20:1 asymmetric penalty ratio of stockouts versus inventory holding.
 
 ---
 
@@ -315,7 +334,8 @@ The dashboard is built with **Next.js (App Router), TypeScript, Tailwind CSS, sh
 ## Production Deployment
 
 - **Live Demo Frontend:** [https://demand-forecasting-inventory-intell.vercel.app/](https://demand-forecasting-inventory-intell.vercel.app/)
-- **Production Backend API:** `http://3.80.207.155:8000` (AWS EC2, Amazon Linux 2023, ARM64 `t4g.small`)
+- **Production Backend:** FastAPI backend containerized on AWS EC2 (Amazon Linux 2023, ARM64 `t4g.small`).
+  - *Public endpoints:* `GET http://3.80.207.155:8000/health` and `POST http://3.80.207.155:8000/forecast`
 - **Container Architecture:** Backend Docker image packages `requirements-prod.txt`, `model_data.parquet`, `demand_forecaster_xgboost.json`, and `calendar.csv`.
 - **Security & Proxy:** The frontend uses a server-side Next.js route proxy (`/api/forecast`) that communicates with the EC2 backend via environment variable `BACKEND_API_URL`, preventing browser-side mixed-content and CORS issues.
 
