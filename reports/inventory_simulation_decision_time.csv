@@ -1,0 +1,2 @@
+series_evaluated,baseline_stockout_rate,forecast_stockout_rate,baseline_service_level,forecast_service_level,baseline_avg_excess_inventory,forecast_avg_excess_inventory,baseline_inventory_cost,forecast_inventory_cost
+50,0.09,0.035,0.91,0.965,52.60999999999999,62.88687580312788,14.133000000000003,11.983964445318284

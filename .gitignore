@@ -13,7 +13,10 @@ data/processed/*.csv
 data/processed/*.xlsx
 
 # Generated outputs
-reports/
+/reports/*
+!/reports/baseline_results.csv
+!/reports/inventory_simulation_decision_time.csv
+!/reports/xgboost_shap_feature_importance.csv
 logs/
 
 # MLflow
