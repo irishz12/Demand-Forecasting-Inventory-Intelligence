@@ -1,5 +1,8 @@
 services:
   backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: demand-forecasting-api:latest
     container_name: demand-forecasting-api
     ports:
@@ -7,6 +10,9 @@ services:
     restart: unless-stopped
 
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     image: demand-forecasting-frontend:latest
     container_name: demand-forecasting-frontend
     ports:

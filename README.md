@@ -44,7 +44,7 @@ flowchart TD
         TV --> BASE["Baseline Models<br/>Naive, Seasonal Naive, Moving Average"]
         TV --> XGB["XGBoost Regressor<br/>n_estimators=500, max_depth=6, lr=0.05"]
         XGB --> EVAL["Statistical Evaluation & SHAP Analysis<br/>MAE, RMSE, WAPE, Mean |SHAP|"]
-        XGB --> REG["MLflow Experiment Tracking & Registry<br/>DemandForecasterXGBoost (v1, READY)"]
+        XGB --> REG["MLflow Experiment Tracking & Registry<br/>DemandForecasterXGBoost (@champion)"]
     end
 
     subgraph Online["Online Serving & Operations Dashboard"]
@@ -281,8 +281,8 @@ The inference backend is implemented using **FastAPI** and served via Uvicorn.
 ## 12. MLOps & Reproducibility
 
 - **Experiment Tracking:** MLflow tracks training metrics, validation MAE/RMSE/WAPE, and hyperparameter dictionaries under experiment `demand-forecasting-xgboost`.
-- **Model Registry:** The XGBoost model is registered in the MLflow Model Registry as `DemandForecasterXGBoost` (Version `1`, Status: `READY`, Run ID: `a86feabaa7ce4de7a2e05a0bc63a6095`).
-- **Containerization:** Multi-stage Docker definitions for both FastAPI and Next.js ensure isolated runtime environments.
+- **Model Registry & Quality Gate:** `DemandForecasterXGBoost` is managed through the MLflow Model Registry using the `champion` alias. Model promotion is automated via an isolated Model Quality Gate that compares candidate metrics against baseline benchmarks, current champion performance, and guardrails before promoting (latest validated promotion run: `4183d9a6ae91402da1c7814502c53fb7`).
+- **Containerization:** Containerized FastAPI and Next.js services with isolated runtime environments.
 - **Dependency Isolation:** Strict separation between development (`requirements-dev.txt`) and production deployment (`requirements-prod.txt`).
 - **Data Integrity:** Strict temporal cutoffs prevent leakage during feature generation and recursive inference.
 
@@ -331,45 +331,84 @@ To maintain rigorous engineering honesty, the following MVP design boundaries sh
 └── README.md
 ```
 
-## 15. How to Run
+## 15. How to Run & Reproduce
 
-### Quickstart with Docker Compose
-The complete multi-service application (FastAPI backend + Next.js frontend) can be launched using Docker Compose:
+### Data & Model Artifact Reproduction Sequence
+The raw Walmart M5 dataset, processed parquet tables, and trained model artifacts are excluded from git version control due to dataset licensing and file size constraints (~1 GB raw, ~2.9 MB model). Because the backend Docker container directly packages `data/processed/model_data.parquet` and `models/demand_forecaster_xgboost.json`, these artifacts must be generated locally prior to building Docker images.
 
-```bash
-docker-compose up --build
-```
-- **Web Dashboard:** [http://localhost:3000](http://localhost:3000)
-- **API Endpoint:** [http://localhost:8000](http://localhost:8000)
-- **Interactive Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+#### Step 1: Raw M5 Dataset Download
+Download the competition files from [Kaggle M5 Forecasting – Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) and place the following three CSVs into `data/raw/`:
+- `data/raw/calendar.csv`
+- `data/raw/sales_train_validation.csv`
+- `data/raw/sell_prices.csv`
 
-### Local Development Setup
-
-#### 1. Backend Setup
+#### Step 2: Environment Setup
 ```bash
 # Create and activate virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install production and development dependencies
+# Install development and training dependencies
 pip install -r requirements-dev.txt
+```
 
-# Run the FastAPI server
+#### Step 3: Data Transformation & Feature Engineering
+Run the repository pipelines to generate the processed parquet tables:
+```bash
+# 1. Unpivot daily sales, join calendar and prices -> outputs data/processed/m5_sales_long.parquet
+python -m src.data.prepare_data
+
+# 2. Filter top 50 series, generate autoregressive lags & rolling stats -> outputs data/processed/model_data.parquet
+python -m src.features.build_features
+```
+
+#### Step 4: Model Training & Quality Gate Promotion
+Execute the XGBoost training pipeline to train the model, evaluate against the Quality Gate, and register the runtime artifact:
+```bash
+python -m src.models.train_xgboost
+```
+This script trains the model on the 28-day temporal validation holdout, logs parameters and metrics to MLflow (`sqlite:///mlflow.db`), evaluates candidate metrics through the Model Quality Gate against the `@champion` alias and guardrails, and upon passing (`PROMOTE`), atomically saves `models/demand_forecaster_xgboost.json` and updates the `champion` alias.
+
+> [!NOTE]
+> **Fresh Clone / Initial Seeding:** On a completely new clone where `mlflow.db` is initialized from scratch with no prior runs, the Model Quality Gate safely evaluates the first model version against the baseline and guardrails, promoting it to version 1 with the `champion` alias.
+
+---
+
+### Running with Docker Compose
+Once `data/processed/model_data.parquet` and `models/demand_forecaster_xgboost.json` have been generated, the complete multi-service application (FastAPI backend + Next.js frontend) can be built and launched via Docker Compose:
+
+```bash
+docker compose up --build
+```
+*(or `docker-compose up --build`)*
+
+- **Web Operations Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **FastAPI REST Endpoint:** [http://localhost:8000](http://localhost:8000)
+- **Interactive Swagger Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+### Local Development Setup
+
+#### 1. Backend Server
+```bash
 uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 2. Frontend Setup
+#### 2. Frontend Development Server
 ```bash
 cd frontend
-
-# Install Node dependencies
 npm install
-
-# Start Next.js development server
 npm run dev
 ```
 
-#### 3. Reproducing Evaluations & Figures
+#### 3. Running Automated Tests
+```bash
+# Run full unit and quality gate test suite (77 tests)
+python -m unittest discover -s tests -v
+```
+
+#### 4. Reproducing Evaluation Figures
 To regenerate evaluation charts from the verified reports:
 ```bash
 python reports/figures/create_evaluation_figures.py
