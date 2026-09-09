@@ -1,0 +1,45 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Data
+data/raw/
+data/processed/*.csv
+data/processed/*.xlsx
+
+# Generated outputs
+reports/
+logs/
+
+# MLflow
+mlruns/
+mlflow.db
+mlflow*.db
+
+# Model artifacts
+models/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Processed datasets
+data/processed/*.parquet

@@ -1,0 +1,16 @@
+services:
+  backend:
+    image: demand-forecasting-api:latest
+    container_name: demand-forecasting-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    image: demand-forecasting-frontend:latest
+    container_name: demand-forecasting-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
