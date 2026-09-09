@@ -1,3 +1,4 @@
+import sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -8,6 +9,8 @@ import mlflow.xgboost
 
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+from src.evaluation.promotion import promote_candidate
 
 INPUT = Path("data/processed/model_data.parquet")
 MODEL_PATH = Path("models/demand_forecaster_xgboost.json")
@@ -69,7 +72,7 @@ model = XGBRegressor(
 
 mlflow.set_experiment("demand-forecasting-xgboost")
 
-with mlflow.start_run():
+with mlflow.start_run() as run:
 
     print("Training XGBoost...")
 
@@ -117,7 +120,37 @@ with mlflow.start_run():
         "demand_forecaster"
     )
 
-    model.save_model(MODEL_PATH)
+    candidates_dir = Path("models/candidates")
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    candidate_path = candidates_dir / f"demand_forecaster_xgboost_{run.info.run_id}.json"
 
-    print(f"\nModel saved: {MODEL_PATH}")
+    model.save_model(candidate_path)
+
+    print(f"\nCandidate model saved: {candidate_path}")
     print("MLflow run logged.")
+
+    print("\nEvaluating candidate with Quality Gate & Promotion Orchestrator...")
+    result = promote_candidate(
+        candidate_run_id=run.info.run_id,
+        candidate_path=candidate_path,
+        target_runtime_path=MODEL_PATH,
+        model_name="DemandForecasterXGBoost",
+    )
+
+    if result.status == "PROMOTED":
+        print("\n=== PROMOTION STATUS: PROMOTED ===")
+        print(f"Model successfully promoted to registered version: {result.registered_version}")
+        print(f"Runtime artifact updated: {MODEL_PATH}")
+        for reason in result.reasons:
+            print(f"  - {reason}")
+    elif result.status == "REJECTED":
+        print("\n=== PROMOTION STATUS: REJECTED ===")
+        print("Candidate did not satisfy Quality Gate criteria. Runtime champion remains untouched.")
+        for reason in result.reasons:
+            print(f"  - {reason}")
+    else:  # FAILED
+        print("\n=== PROMOTION STATUS: FAILED ===")
+        print(f"Operational/infrastructure failure during promotion: {result.error}")
+        for reason in result.reasons:
+            print(f"  - {reason}")
+        sys.exit(1)
