@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements-prod.txt
 COPY src ./src
 COPY data/processed/model_data.parquet ./data/processed/model_data.parquet
 COPY models/demand_forecaster_xgboost.json ./models/demand_forecaster_xgboost.json
+COPY data/raw/calendar.csv ./data/raw/calendar.csv
 
 EXPOSE 8000
 

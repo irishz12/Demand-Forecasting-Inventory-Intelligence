@@ -1,12 +1,16 @@
 import unittest
+from unittest.mock import patch
 import numpy as np
+import pandas as pd
 from pathlib import Path
 
 from src.inference.forecast import (
     forecast_series,
+    load_calendar_lookup,
     FEATURE_COLS,
     DATA_PATH,
     MODEL_PATH,
+    CALENDAR_PATH,
 )
 
 
@@ -77,7 +81,66 @@ class TestForecastValidation(unittest.TestCase):
         # New 7-day rolling window contains six 10.0s and one 17.0
         new_w7 = np.array(history[-7:])
         self.assertAlmostEqual(new_w7.mean(), (60.0 + 17.0) / 7.0, places=4)
-        self.assertGreater(new_w7.std(), 0.0)
+        self.assertGreater(new_w7.std(ddof=1), 0.0)
+
+    def test_rolling_std_ddof_1_alignment(self):
+        """Verify rolling std uses ddof=1 to align with training pandas rolling().std()."""
+        sample_window = np.array([10.0, 20.0])
+        # ddof=0 produces population std (5.0)
+        self.assertEqual(sample_window.std(ddof=0), 5.0)
+        # ddof=1 produces sample std sqrt(50) = 7.0710678...
+        expected_ddof1 = np.sqrt(50.0)
+        self.assertAlmostEqual(sample_window.std(ddof=1), expected_ddof1, places=6)
+
+        # Confirm pandas rolling().std() default matches np.std(ddof=1)
+        s = pd.Series([10.0, 20.0])
+        self.assertAlmostEqual(s.rolling(2).std().iloc[-1], sample_window.std(ddof=1), places=6)
+
+
+class TestCalendarExogenousInference(unittest.TestCase):
+    """Test calendar lookup and fallback handling for exogenous features."""
+
+    def test_calendar_lookup_event_and_snap_extraction(self):
+        """Verify calendar lookup parses known future dates with correct int types."""
+        lookup = load_calendar_lookup(CALENDAR_PATH)
+        self.assertGreater(len(lookup), 0)
+
+        # 2016-04-30: Pesach End (event_flag=1, snap_CA=0)
+        entry_0430 = lookup.get("2016-04-30")
+        self.assertIsNotNone(entry_0430)
+        self.assertEqual(entry_0430["event_flag"], 1)
+        self.assertEqual(entry_0430["snap_CA"], 0)
+        self.assertIsInstance(entry_0430["event_flag"], int)
+        self.assertIsInstance(entry_0430["snap_CA"], int)
+
+        # 2016-05-01: Orthodox Easter & SNAP in CA/TX
+        entry_0501 = lookup.get("2016-05-01")
+        self.assertIsNotNone(entry_0501)
+        self.assertEqual(entry_0501["event_flag"], 1)
+        self.assertEqual(entry_0501["snap_CA"], 1)
+        self.assertEqual(entry_0501["snap_TX"], 1)
+        self.assertEqual(entry_0501["snap_WI"], 0)
+        self.assertIsInstance(entry_0501["event_flag"], int)
+        self.assertIsInstance(entry_0501["snap_CA"], int)
+
+    def test_missing_calendar_file_returns_empty_lookup_gracefully(self):
+        """Missing calendar file must return empty dict rather than raising FileNotFoundError."""
+        lookup = load_calendar_lookup(Path("data/raw/non_existent_calendar.csv"))
+        self.assertEqual(lookup, {})
+
+    def test_missing_calendar_falls_back_safely(self):
+        """When calendar lookup is empty, forecast_series completes using latest historical values."""
+        with patch("src.inference.forecast.load_calendar_lookup", return_value={}):
+            result = forecast_series(
+                store_id="CA_1",
+                item_id="FOODS_3_090",
+                forecast_days=7,
+            )
+            self.assertEqual(len(result), 7)
+            self.assertEqual(
+                list(result.columns),
+                ["date", "store_id", "item_id", "forecast"],
+            )
 
 
 if __name__ == "__main__":

@@ -9,9 +9,13 @@ print("Loading processed data...")
 df = pd.read_parquet(INPUT)
 
 # Keep a manageable subset:
-# top 50 store-item combinations by total historical sales
+# top 50 store-item combinations by training-period sales volume (pre-validation)
+max_date = df["date"].max()
+validation_start = max_date - pd.Timedelta(days=27)
+
 top_series = (
-    df.groupby(["store_id", "item_id"])["sales"]
+    df[df["date"] < validation_start]
+    .groupby(["store_id", "item_id"])["sales"]
     .sum()
     .nlargest(50)
     .reset_index()[["store_id", "item_id"]]

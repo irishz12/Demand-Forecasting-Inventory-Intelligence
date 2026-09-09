@@ -80,9 +80,9 @@ def recursive_forecast(history, future_rows, model):
             "rolling_mean_14": window_14.mean(),
             "rolling_mean_28": window_28.mean(),
 
-            "rolling_std_7": window_7.std(),
-            "rolling_std_14": window_14.std(),
-            "rolling_std_28": window_28.std(),
+            "rolling_std_7": window_7.std(ddof=1),
+            "rolling_std_14": window_14.std(ddof=1),
+            "rolling_std_28": window_28.std(ddof=1),
         }])[FEATURE_COLS]
 
         prediction = float(model.predict(row)[0])
@@ -219,7 +219,7 @@ def simulate_series(series, model):
             [
                 history,
                 series[
-                    (series["date"] >= decision_date)
+                    (series["date"] > decision_date)
                     & (series["date"] <= future_end)
                 ],
             ],

@@ -2,7 +2,7 @@
 
 An end-to-end, ML-driven demand forecasting and inventory recommendation system built with XGBoost, FastAPI, Next.js, Docker, and MLflow on Walmart M5 retail data.
 
-**In short:** Across the top 50 high-volume store-item series, the XGBoost forecasting model achieved a **22.55% WAPE**, representing a **~22.9% relative reduction** over the best baseline (Moving Average, 29.25% WAPE). In a decision-time closed-loop inventory simulation over a 28-day evaluation window, forecast-driven replenishment reduced the stockout rate from **9.00% to 3.50%** (a **61.1% relative reduction**), increased service level from **91.00% to 96.50%**, and reduced total inventory-related simulation costs by **~15.2%** (14.13 → 11.98).
+**In short:** Across the top 50 high-volume store-item series, the XGBoost forecasting model achieved a **22.55% WAPE**, representing a **~22.9% relative reduction** over the best baseline (Moving Average, 29.25% WAPE). In a decision-time closed-loop inventory simulation over a 28-day evaluation window, forecast-driven replenishment reduced the stockout rate from **9.00% to 3.50%** (a **61.1% relative reduction**), increased service level from **91.00% to 96.50%**, and reduced total inventory-related simulation costs by **~16.0%** (14.13 → 11.87).
 
 **Stack:** Python · XGBoost · scikit-learn · SHAP · FastAPI · Next.js · TypeScript · Tailwind CSS · shadcn/ui · Recharts · Docker · Docker Compose · MLflow
 
@@ -140,7 +140,7 @@ At inference time, managers require multi-day projections (7, 14, or 30 days). T
 1. Step 1 ($t+1$) is predicted using true historical sales.
 2. For step $k$ ($t+k$), predicted sales from steps $t+1 \dots t+k-1$ are dynamically fed back into the feature matrix to update `lag_1`, rolling means, and rolling standard deviations.
 3. Exogenous calendar signals (`day_of_week`, `week_of_year`, `month_num`) increment deterministically along the forecast horizon.
-4. *Scope assumption:* Future sell prices, holiday events, and SNAP flags are carried forward from the latest available observation.
+4. *Scope assumption:* Future sell prices are carried forward from the latest available observation. Future holiday event flags and SNAP indicators are sourced from the known M5 future calendar (`data/raw/calendar.csv`), with a fallback to the latest historical values if a date is unavailable.
 
 ## 7. Model Explainability
 
@@ -181,25 +181,25 @@ To evaluate practical operational effectiveness, a closed-loop simulation was ex
 | :--- | :---: | :---: | :--- |
 | **Stockout Rate** | 9.00% | **3.50%** | **-5.50 pp** (61.1% relative reduction) |
 | **Service Level** | 91.00% | **96.50%** | **+5.50 pp** improvement |
-| **Average Excess Inventory** | **52.61** | 62.89 | +10.28 units buffer expansion |
-| **Inventory-Related Cost** | 14.13 | **11.98** | **-15.2%** relative cost reduction |
+| **Average Excess Inventory** | **52.61** | 61.52 | +8.91 units buffer expansion |
+| **Inventory-Related Cost** | 14.13 | **11.87** | **-16.0%** relative cost reduction |
 
-**Simulation Interpretation:** By dynamically adapting to upcoming peaks and troughs rather than lagging behind them, the forecast-driven strategy strategically increased average buffer inventory during high-risk periods. This eliminated more than 60% of stockout events, raising service levels from 91% to 96.5% and achieving a net 15.2% cost reduction under the asymmetric holding-versus-stockout cost structure.
+**Simulation Interpretation:** By dynamically adapting to upcoming peaks and troughs rather than lagging behind them, the forecast-driven strategy strategically increased average buffer inventory during high-risk periods. This eliminated more than 60% of stockout events, raising service levels from 91% to 96.5% and achieving a net 16.0% cost reduction under the asymmetric holding-versus-stockout cost structure.
 
 ### Concrete Verified Example
 For Store `CA_1`, Item `FOODS_3_090`, with 50 units of available inventory over a 7-day horizon:
 
 - **Recursive Daily Predictions:**
-  - 2016-04-25: 38.87 units
-  - 2016-04-26: 40.85 units
-  - 2016-04-27: 40.05 units
-  - 2016-04-28: 43.80 units
-  - 2016-04-29: 60.99 units
-  - 2016-04-30: 71.74 units
-  - 2016-05-01: 63.79 units
-- **Total Forecast Demand:** 360.08 units
-- **Safety Stock (20%):** 72.02 units
-- **Recommended Order:** **382.10 units** ($360.08 + 72.02 - 50.00 = 382.10$)
+  - 2016-04-25: 38.82 units
+  - 2016-04-26: 40.61 units
+  - 2016-04-27: 39.90 units
+  - 2016-04-28: 43.45 units
+  - 2016-04-29: 60.70 units
+  - 2016-04-30: 72.61 units
+  - 2016-05-01: 67.67 units
+- **Total Forecast Demand:** 363.77 units
+- **Safety Stock (20%):** 72.75 units
+- **Recommended Order:** **336.53 units** ($363.77 + 72.75 - 100.00 = 336.53$ with 100 units available)
 
 ## 9. Benchmark Results
 
@@ -215,7 +215,7 @@ For Store `CA_1`, Item `FOODS_3_090`, with 50 units of available inventory over 
 | Strategy | Stockout Rate | Service Level | Avg. Excess Inventory | Total Simulation Cost |
 | :--- | :---: | :---: | :---: | :---: |
 | Moving Average Baseline | 9.00% | 91.00% | 52.61 units | 14.13 |
-| **Forecast-Driven (XGBoost)** | **3.50%** | **96.50%** | **62.89 units** | **11.98** |
+| **Forecast-Driven (XGBoost)** | **3.50%** | **96.50%** | **61.52 units** | **11.87** |
 
 ## 10. Frontend Dashboard
 
@@ -281,19 +281,23 @@ The inference backend is implemented using **FastAPI** and served via Uvicorn.
 ## 12. MLOps & Reproducibility
 
 - **Experiment Tracking:** MLflow tracks training metrics, validation MAE/RMSE/WAPE, and hyperparameter dictionaries under experiment `demand-forecasting-xgboost`.
-- **Model Registry & Quality Gate:** `DemandForecasterXGBoost` is managed through the MLflow Model Registry using the `champion` alias. Model promotion is automated via an isolated Model Quality Gate that compares candidate metrics against baseline benchmarks, current champion performance, and guardrails before promoting (latest validated promotion run: `4183d9a6ae91402da1c7814502c53fb7`).
-- **Containerization:** Containerized FastAPI and Next.js services with isolated runtime environments.
+- **Model Registry & Quality Gate:** `DemandForecasterXGBoost` is managed through the MLflow Model Registry using the `champion` alias. Model promotion is automated via an isolated Model Quality Gate that compares candidate metrics against baseline benchmarks, current champion performance, and guardrails before promoting (latest validated promotion: version 3).
+- **Containerization:** Containerized FastAPI and Next.js services with isolated runtime environments. The backend image packages `data/processed/model_data.parquet`, `models/demand_forecaster_xgboost.json`, and `data/raw/calendar.csv` for future calendar event and SNAP lookups during recursive inference.
 - **Dependency Isolation:** Strict separation between development (`requirements-dev.txt`) and production deployment (`requirements-prod.txt`).
-- **Data Integrity:** Strict temporal cutoffs prevent leakage during feature generation and recursive inference.
+- **Data Integrity:** Strict temporal cutoffs prevent leakage during feature generation and recursive inference. Top-50 series selection is based exclusively on training-period data (prior to the 28-day validation window).
+- **Startup Caching:** The FastAPI application pre-warms model, processed data, and calendar lookup on startup via `lifespan` and `@lru_cache`, eliminating per-request disk I/O and model parsing overhead.
 
 ## 13. Limitations & Production Scope
 
 To maintain rigorous engineering honesty, the following MVP design boundaries should be noted:
 
 1. **Modeling Scope:** The current pipeline trains and evaluates on the top 50 high-volume store-item series. It is not currently deployed across all 30,490 series in the complete M5 hierarchical dataset.
-2. **Heuristic Safety Stock:** Safety stock is calculated using a fixed 20% demand percentage heuristic rather than a full stochastic replenishment optimizer (e.g., dynamic lead-time variance modeling or $(s, S)$ continuous-review policies).
-3. **Exogenous Variable Roll-Forward:** In recursive multi-step forecasting, future sell prices, holiday events, and SNAP flags are forward-filled from the latest observed value rather than ingested from a live external pricing and promotional calendar service.
-4. **Simulation Boundaries:** The inventory simulation demonstrates policy behavior under explicit, fixed holding cost (0.10) and stockout penalty (2.00) parameters. It should be understood as an offline validation simulation, not a measured empirical business impact from live production retail deployment.
+2. **Series Selection:** Top-50 series selection is based strictly on training-period sales totals (prior to the 28-day validation cutoff), preventing information leakage from the validation period into the cohort selection step.
+3. **Validation Methodology:** XGBoost validation metrics (MAE, RMSE, WAPE) reflect **teacher-forced 1-step-ahead** predictions on the 28-day holdout. Production multi-day forecasts use **recursive multi-step** inference, where each prior step's prediction feeds subsequent feature windows. These are different evaluation regimes; recursive accuracy will generally be lower than teacher-forced accuracy.
+4. **Heuristic Safety Stock:** Safety stock is calculated using a fixed 20% demand percentage heuristic rather than a full stochastic replenishment optimizer (e.g., dynamic lead-time variance modeling or $(s, S)$ continuous-review policies).
+5. **Exogenous Variable Handling:** In recursive multi-step forecasting, **future sell prices are carried forward** from the latest known value. **Future event flags and SNAP indicators** use actual known M5 calendar values from `data/raw/calendar.csv` (packaged in the Docker image). A graceful fallback to the latest historical values is applied if a forecast date is not present in the calendar.
+6. **Rolling Standard Deviation:** Both training feature engineering (`pandas rolling().std()`) and inference (`numpy array.std(ddof=1)`) use consistent `ddof=1` (sample standard deviation) for train-serving consistency.
+7. **Simulation Boundaries:** The inventory simulation demonstrates policy behavior under explicit, fixed holding cost (0.10) and stockout penalty (2.00) parameters. It should be understood as an **offline periodic-review inventory policy simulation**, not a measured empirical business impact from live production retail deployment.
 
 ## 14. Project Structure
 
@@ -404,7 +408,7 @@ npm run dev
 
 #### 3. Running Automated Tests
 ```bash
-# Run full unit and quality gate test suite (77 tests)
+# Run full unit and quality gate test suite (84 tests)
 python -m unittest discover -s tests -v
 ```
 

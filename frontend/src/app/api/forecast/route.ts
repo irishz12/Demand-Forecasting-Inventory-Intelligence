@@ -1,5 +1,5 @@
 const BACKEND_URL =
-  process.env.BACKEND_API_URL || "http://3.80.207.155:8000";
+  process.env.BACKEND_API_URL || "http://localhost:8000";
 
 export async function POST(request: Request) {
   try {

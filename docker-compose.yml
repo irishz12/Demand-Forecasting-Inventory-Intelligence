@@ -17,6 +17,8 @@ services:
     container_name: demand-forecasting-frontend
     ports:
       - "3000:3000"
+    environment:
+      - BACKEND_API_URL=http://backend:8000
     depends_on:
       - backend
     restart: unless-stopped

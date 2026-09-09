@@ -5,6 +5,7 @@ __pycache__/
 .gitignore
 
 data/raw/
+!data/raw/calendar.csv
 data/processed/*.csv
 data/processed/*.xlsx
 

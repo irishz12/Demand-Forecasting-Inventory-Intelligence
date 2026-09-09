@@ -1,17 +1,33 @@
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from src.inference.forecast import (
+    load_data,
+    load_model,
+    load_calendar_lookup,
+)
 from src.inventory.inventory_recommendation import (
     generate_inventory_recommendation,
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load model, processed dataset, and calendar lookup once at startup
+    load_data()
+    load_model()
+    load_calendar_lookup()
+    yield
+
+
 app = FastAPI(
     title="Demand Forecasting & Inventory Intelligence API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
