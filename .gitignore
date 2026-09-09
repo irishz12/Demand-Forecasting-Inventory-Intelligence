@@ -8,7 +8,8 @@ __pycache__/
 .DS_Store
 
 # Data
-data/raw/
+data/raw/*
+!data/raw/calendar.csv
 data/processed/*.csv
 data/processed/*.xlsx
 

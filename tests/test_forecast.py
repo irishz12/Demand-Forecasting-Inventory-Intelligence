@@ -130,7 +130,25 @@ class TestCalendarExogenousInference(unittest.TestCase):
 
     def test_missing_calendar_falls_back_safely(self):
         """When calendar lookup is empty, forecast_series completes using latest historical values."""
-        with patch("src.inference.forecast.load_calendar_lookup", return_value={}):
+        from unittest.mock import MagicMock
+        dates = pd.date_range("2016-01-01", periods=30, freq="D")
+        mock_data = pd.DataFrame({
+            "store_id": ["CA_1"] * 30,
+            "item_id": ["FOODS_3_090"] * 30,
+            "date": dates,
+            "sales": [10.0] * 30,
+            "sell_price": [2.5] * 30,
+            "event_flag": [1] * 30,
+            "snap_CA": [1] * 30,
+            "snap_TX": [0] * 30,
+            "snap_WI": [0] * 30,
+        })
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([15.0])
+
+        with patch("src.inference.forecast.load_data", return_value=mock_data), \
+             patch("src.inference.forecast.load_model", return_value=mock_model), \
+             patch("src.inference.forecast.load_calendar_lookup", return_value={}):
             result = forecast_series(
                 store_id="CA_1",
                 item_id="FOODS_3_090",
