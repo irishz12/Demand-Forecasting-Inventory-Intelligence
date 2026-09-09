@@ -1,239 +1,257 @@
 # Demand Forecasting & Inventory Intelligence
 
-An end-to-end, ML-driven demand forecasting and inventory recommendation system built with XGBoost, FastAPI, Next.js, Docker, and MLflow on Walmart M5 retail data.
+An end-to-end machine learning system that translates retail demand forecasts into operational inventory replenishment recommendations. Built with XGBoost, FastAPI, Next.js, Docker, and MLflow on Walmart M5 historical retail data, the system evaluates the top 50 high-volume store-product series and automates safe model deployment through an auditable champion/challenger quality gate.
 
-**In short:** Across the top 50 high-volume store-item series, the XGBoost forecasting model achieved a **22.55% WAPE**, representing a **~22.9% relative reduction** over the best baseline (Moving Average, 29.25% WAPE). In a decision-time closed-loop inventory simulation over a 28-day evaluation window, forecast-driven replenishment reduced the stockout rate from **9.00% to 3.50%** (a **61.1% relative reduction**), increased service level from **91.00% to 96.50%**, and reduced total inventory-related simulation costs by **~16.0%** (14.13 → 11.87).
-
-**Stack:** Python · XGBoost · scikit-learn · SHAP · FastAPI · Next.js · TypeScript · Tailwind CSS · shadcn/ui · Recharts · Docker · Docker Compose · MLflow
+**Live Demo:** [https://demand-forecasting-inventory-intell.vercel.app/](https://demand-forecasting-inventory-intell.vercel.app/)<br/>
+**Production API:** `http://3.80.207.155:8000` (AWS EC2)
 
 ---
 
-## 1. Problem
+## Problem
 
-Retail supply-chain and inventory teams face a fundamental operational tension: stockouts lead to unrecoverable lost revenue and diminished customer loyalty, while excess inventory ties up working capital, inflates holding costs, and increases obsolescence risks.
+Retail inventory managers face an asymmetric operational trade-off:
 
-Traditional retail heuristics—such as naive repeat-last-day rules or simple moving averages—fail because SKU-level retail demand is inherently non-stationary. Daily sales exhibit temporal patterns associated with day-of-week seasonality, calendar events, selling prices, and SNAP indicators. A forecasting system must capture these multivariate temporal patterns while translating statistical demand predictions directly into actionable replenishment decisions.
+1. **Under-ordering (Stockouts):** Directly causes unrecoverable lost revenue, backorders, and damaged customer loyalty.
+2. **Over-ordering (Excess Stock):** Ties up working capital in holding costs, strains physical warehouse capacity, and increases perishable spoilage or obsolescence risk.
 
-## 2. Business Use Case & Value Framework
+Traditional retail heuristics—such as naive repeat-last-day rules or simple moving averages—consistently lag behind demand shifts because daily SKU sales exhibit non-stationary seasonality, day-of-week surges, promotional events, and SNAP subsidy schedules. A production forecasting system must capture multivariate temporal interactions while translating statistical demand predictions into net replenishment recommendations that protect service levels.
 
-This project models the core decision loop of a **retail supply-chain and inventory manager**: determining how many units of a specific product to order for a specific store over an upcoming replenishment horizon.
+---
 
-```
-+-----------------------------------------------------------------------------------+
-|                            RETAIL VALUE FRAMEWORK                                 |
-+------------------------------------+----------------------------------------------+
-| Under-Ordering Risk (Stockouts)    | Lost revenue, backorders, brand erosion      |
-| Over-Ordering Risk (Excess Stock)  | Working capital lockup, storage cost, waste   |
-| Optimization Goal                  | Maximize service level while minimizing cost |
-+------------------------------------+----------------------------------------------+
-```
+## Solution
 
-To bridge the gap between statistical forecasting and business operations, point forecasts are converted into net reorder recommendations using safety stock buffers. This enables evaluation not merely on statistical error metrics (MAE, RMSE, WAPE), but on operational supply-chain outcomes: stockout incidence, fulfillment service level, and net inventory holding and penalty costs.
+The system addresses this challenge through a closed-loop decision workflow:
 
-## 3. System Architecture
+- **Time-Series Feature Engineering:** Generates autoregressive lags, rolling window statistics, calendar attributes, selling prices, and state-level SNAP subsidy indicators without lookahead leakage.
+- **Gradient Boosted Forecasting:** Trains an XGBoost regression model on a strictly temporal train/validation split.
+- **Recursive Multi-Step Inference:** Dynamically rolls predictions forward over configurable planning horizons (7, 14, or 30 days), dynamically updating lag and rolling features while querying known calendar holiday events and SNAP dates.
+- **Inventory Recommendation Layer:** Converts point forecasts into net reorder recommendations using a safety stock buffer configured to balance stockout risk against inventory holding costs.
+- **Full-Stack Serving & Observability:** Serves predictions via a high-performance FastAPI backend containerized with Docker on AWS EC2, accessed through an interactive Next.js operations dashboard.
 
-The repository separates offline model experimentation and validation from online low-latency inference and operations dashboard serving:
+---
+
+## Key Results
+
+### 1. Forecasting Accuracy (28-Day Temporal Holdout)
+
+All models were evaluated on the final 28-day validation window (2016-03-28 through 2016-04-24, 1,400 observations across the 50 series) using 1-step teacher-forced evaluation:
+
+| Model | MAE | RMSE | WAPE | Relative WAPE vs. Best Baseline |
+| :--- | :---: | :---: | :---: | :---: |
+| **Naive (Lag 1)** | 12.1736 | 19.0373 | 31.6437% | +8.20% |
+| **Seasonal Naive (Lag 7)** | 11.6086 | 18.0619 | 30.1751% | +3.18% |
+| **Moving Average (7-Day Rolling Mean)** | 11.2509 | 16.4727 | 29.2454% | Baseline (0.00%) |
+| **XGBoost Regressor** | **8.6744** | **12.6023** | **22.5481%** | **-22.90%** |
+
+$$\text{Relative WAPE Improvement} = \frac{29.2454\% - 22.5481\%}{29.2454\%} = \mathbf{22.90\%}$$
+
+> [!NOTE]
+> **Accuracy Caveat:** The 22.55% WAPE reflects 1-step teacher-forced validation on historical actuals. Multi-step recursive forecasts generated in production accumulate error over 7, 14, and 30-day horizons.
+
+### 2. Decision-Time Inventory Simulation (28-Day Window)
+
+To evaluate operational impact, a closed-loop periodic-review simulation was executed across all 50 series over the 28-day validation period, comparing a 7-day Moving Average heuristic against the XGBoost forecast-driven policy:
+
+| Simulation Metric | Baseline Strategy (7-day MA) | Forecast-Driven Strategy (XGBoost) | Operational Impact |
+| :--- | :---: | :---: | :--- |
+| **Stockout Rate** | 9.00% | **3.50%** | **-5.50 pp** (61.1% relative reduction) |
+| **Service Level** | 91.00% | **96.50%** | **+5.50 pp** service level improvement |
+| **Average Excess Inventory** | **52.61 units** | 61.52 units | +8.91 units strategic buffer |
+| **Inventory-Related Cost** | 14.13 | **11.87** | **-16.00%** net cost reduction |
+
+*Simulation parameters: 7-day review cycle, 20% safety stock buffer, unit holding cost = 0.10/day, unit stockout penalty = 2.00/unit.*
+
+---
+
+## Architecture
+
+The system decouples offline model training and MLOps governance from online low-latency inference and operations dashboard serving:
 
 ```mermaid
 flowchart TD
-    subgraph Offline["Offline Model Training & Evaluation"]
+    subgraph Offline["Offline Training & Governance Pipeline"]
         direction TB
-        M5["M5 Dataset (Walmart)<br/>calendar, sales_train_validation, sell_prices"] --> DP["Data Preparation Pipeline<br/>Wide-to-Long, Merge Calendar & Prices"]
-        DP --> FE["Time-Series Feature Engineering<br/>Lags (1, 7, 14, 28), Rolling Stats, SNAP, Events"]
-        FE --> TV["Temporal Validation Split<br/>Train: 92,850 rows | Val: 1,400 rows (Last 28 Days)"]
-        TV --> BASE["Baseline Models<br/>Naive, Seasonal Naive, Moving Average"]
-        TV --> XGB["XGBoost Regressor<br/>n_estimators=500, max_depth=6, lr=0.05"]
-        XGB --> EVAL["Statistical Evaluation & SHAP Analysis<br/>MAE, RMSE, WAPE, Mean |SHAP|"]
-        XGB --> REG["MLflow Experiment Tracking & Registry<br/>DemandForecasterXGBoost (@champion)"]
+        M5["Walmart M5 Dataset<br/>calendar, sales, prices"] --> PREP["Data Cleaning & Preprocessing<br/>Wide-to-Long, Date Alignment"]
+        PREP --> FE["Time-Series Feature Engineering<br/>Lags (1, 7, 14, 28), Rolling Stats, SNAP, Events"]
+        FE --> SPLIT["Temporal Holdout Split<br/>Train: 92,850 rows | Val: 1,400 rows"]
+        SPLIT --> BASE["Benchmark Baselines<br/>Naive, Seasonal Naive, Moving Average"]
+        SPLIT --> TRAIN["XGBoost Training<br/>n_estimators=500, max_depth=6, lr=0.05"]
+        TRAIN --> SHAP["TreeSHAP Explainability<br/>Feature Importance Attribution"]
+        TRAIN --> GATE["Model Quality Gate & Promotion<br/>WAPE &le; Baseline &amp; Guardrails &rarr; Champion Alias"]
+        GATE --> REG["MLflow Model Registry<br/>DemandForecasterXGBoost (@champion)"]
+        REG --> RUNTIME["Runtime Artifact<br/>models/demand_forecaster_xgboost.json"]
     end
 
-    subgraph Online["Online Serving & Operations Dashboard"]
+    subgraph Online["Online Serving & Operational UI"]
         direction TB
-        MGR["Supply-Chain / Inventory Manager"] --> UI["Next.js Operations Dashboard<br/>Store, SKU, Available Inventory, Horizon (7/14/30d)"]
-        UI --> API["FastAPI REST Service<br/>POST /forecast | GET /health"]
-        API --> ENG["Inference Engine<br/>Model: DemandForecasterXGBoost"]
-        ENG --> REC["Recursive Multi-Step Forecaster<br/>Auto-updates Lags & Rolling Windows"]
-        REC --> INV["Inventory Recommendation Logic<br/>Safety Stock (20%) & Net Reorder Calculation"]
-        INV --> RES["JSON Response & UI Dashboard<br/>Daily Forecast Chart, Reorder Status, Safety Stock"]
+        USER["Supply Chain Planner"] --> UI["Next.js Operations Dashboard<br/>Vercel Serverless"]
+        UI --> PROXY["Next.js Server-Side Proxy<br/>POST /api/forecast"]
+        PROXY --> API["FastAPI REST API<br/>Docker Container on AWS EC2"]
+        API --> ENGINE["Inference Engine<br/>Cached Model + Parquet Context"]
+        ENGINE --> REC["Recursive Forecaster<br/>M5 Calendar Event/SNAP Lookup"]
+        REC --> INV["Inventory Decision Engine<br/>Safety Stock &amp; Net Reorder Calculation"]
+        INV --> RESP["JSON Response<br/>Daily Projections, KPIs, Reorder Status"]
+        RESP --> UI
     end
 ```
 
-## 4. Dataset & Temporal Validation
+### Production Request Flow
 
-### Dataset Source
-The system is built using the [Kaggle M5 Forecasting – Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) benchmark, which comprises hierarchical Walmart sales data across three US states (California, Texas, Wisconsin):
+1. The planner selects a Store, Product, Available Inventory, and Planning Horizon (7, 14, or 30 days) in the Next.js UI.
+2. The browser dispatches a `POST` request to the local route `/api/forecast`.
+3. The Next.js server-side proxy reads `process.env.BACKEND_API_URL` and securely forwards the payload to the FastAPI backend on AWS EC2 (`http://3.80.207.155:8000/forecast`), preventing browser CORS issues and shielding backend infrastructure.
+4. FastAPI executes cached recursive inference, applies safety stock calculations, and returns structured daily predictions and inventory recommendations.
 
-- `sales_train_validation.csv`: Daily unit sales per product-store series.
-- `calendar.csv`: Dates, day-of-week, event flags, and SNAP purchase allowance indicators.
-- `sell_prices.csv`: Store- and product-specific weekly selling prices.
+---
 
-*(Note: `sales_train_evaluation.csv` and `sample_submission.csv` were not used in this implementation.)*
+## Dataset
 
-### Data Preparation & Scope
-1. Daily sales were unpivoted from wide format to a unified long time series.
-2. Calendar attributes and weekly sell prices were joined temporally. Missing price entries were handled systematically during feature extraction.
-3. The full processed dataset contains **58,327,370 rows** spanning from **2011-01-29 through 2016-04-24**.
-4. **Scope boundary:** To ensure complete computational reproducibility, the modeling dataset filters to the **top 50 store-item series** ranked by total historical sales volume. The final modeled dataset contains **94,250 rows and 27 columns** spanning **2011-02-26 through 2016-04-24** (after accommodating maximum feature lag windows).
+The project utilizes the [Kaggle M5 Forecasting – Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) benchmark, consisting of hierarchical retail sales data from Walmart across three US states (California, Texas, Wisconsin):
 
-### Temporal Validation Strategy
-Because time-series observations are sequentially dependent, standard random train/test splitting introduces severe future-to-past lookahead leakage. Validation uses a strictly time-based split:
+- `calendar.csv`: Contains calendar dates, day-of-week, event/holiday names, and SNAP allowance flags per state (1,969 total days covering 2011-01-29 through 2016-06-19).
+- `sales_train_validation.csv`: Daily unit sales per store-item combination.
+- `sell_prices.csv`: Weekly store- and item-level selling prices.
 
-- **Training period:** 2011-02-26 through 2016-03-27 (**92,850 rows**)
-- **Validation period:** 2016-03-28 through 2016-04-24 (**1,400 rows**, covering the final 28 days across all 50 series)
+### MVP Scope & Selection
+- The full M5 dataset contains **58,327,370 rows** across 30,490 series.
+- **Top 50 Series Scope:** To establish a reproducible, computationally tractable, and production-tested MVP, the modeling pipeline isolates the **top 50 store-item series** ranked by total unit sales volume.
+- **Leakage Prevention:** Top-series cohort ranking is calculated strictly on training-period observations prior to the validation cutoff (`date < 2016-03-28`), preventing validation-window information from biasing series selection.
+- The modeled dataset spans **94,250 rows and 27 columns** (2011-02-26 through 2016-04-24) after accommodating maximum lag calculation windows.
 
-## 5. Baselines
+---
 
-To establish meaningful benchmark thresholds, three standard time-series baselines were implemented and evaluated on the exact 28-day validation horizon (`reports/baseline_results.csv`):
+## ML Methodology
 
-1. **Naive:** Predicts demand at day $t$ as equal to demand at day $t-1$.
-2. **Seasonal Naive (7-day):** Predicts demand at day $t$ as equal to demand at day $t-7$ to capture weekly seasonality.
-3. **Moving Average (7-day):** Predicts demand at day $t$ as the trailing 7-day arithmetic mean.
-
-| Model | MAE | RMSE | WAPE | Benchmark Context |
-| :--- | :---: | :---: | :---: | :--- |
-| **Naive** | 12.1736 | 19.0373 | 31.6437% | Basic persistence baseline |
-| **Seasonal Naive** | 11.6086 | 18.0619 | 30.1751% | Captures weekly cyclicality |
-| **Moving Average (7-day)** | **11.2509** | **16.4727** | **29.2454%** | **Strongest baseline**; smooths high-frequency noise |
-
-The 7-day Moving Average established the primary benchmark target with a **29.2454% WAPE**.
-
-## 6. Machine Learning Methodology
-
-### Feature Engineering
-The final model consumes **19 structured features** engineered without lookahead bias:
-
-- **Autoregressive Lags:** `lag_1`, `lag_7`, `lag_14`, `lag_28`
-- **Rolling Window Statistics:** `rolling_mean_7`, `rolling_mean_14`, `rolling_mean_28`, `rolling_std_7`, `rolling_std_14`, `rolling_std_28`
-- **Calendar & Seasonality:** `day_of_week` (0–6), `month_num` (1–12), `year_num`, `week_of_year`, `event_flag` (binary holiday indicator)
-- **Economic & Policy Signals:** `sell_price`, `snap_CA`, `snap_TX`, `snap_WI`
-
-### XGBoost Model Configuration
-The forecasting engine uses an `XGBRegressor` trained on squared error loss with mean absolute error tracking:
-
-```python
-XGBRegressor(
-    n_estimators=500,
-    max_depth=6,
-    learning_rate=0.05,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    objective="reg:squarederror",
-    eval_metric="mae",
-    n_jobs=4,
-    random_state=42
-)
+```
+Data Cleaning ──> Wide-to-Long ──> Feature Engineering ──> Temporal Split ──> Baseline Benchmarks ──> XGBoost ──> Quality Gate ──> SHAP
 ```
 
-### Validation Performance
-On the 28-day temporal validation holdout, XGBoost delivered substantial improvements across all evaluation dimensions:
+1. **Data Cleaning & Reshaping:** Unpivots daily sales columns (`d_1` to `d_1913`) into long-format time series. Joins calendar attributes and weekly sell prices on date, store, and item keys.
+2. **Temporal Validation Split:** Splits data chronologically rather than randomly to prevent future-to-past lookahead leakage:
+   - **Training Set:** 2011-02-26 to 2016-03-27 (**92,850 rows**)
+   - **Validation Set:** 2016-03-28 to 2016-04-24 (**1,400 rows**, final 28 days across all 50 series)
+3. **Benchmark Formulation:** Evaluates standard naive and moving average baselines on the holdout to establish performance floors.
+4. **Model Training:** Fits an `XGBRegressor` on squared error loss, monitoring validation MAE.
+5. **Quality Gate Verification:** Evaluates candidate model metrics against baselines, champion version, and guardrails before promoting to production.
+6. **Explainability Attribution:** Computes TreeSHAP feature attributions on validation samples.
 
-- **MAE:** 8.6744 (vs. baseline 11.2509)
-- **RMSE:** 12.6023 (vs. baseline 16.4727)
-- **WAPE:** **22.5481%** (vs. baseline 29.2454%)
-- **Relative WAPE Reduction:** **~22.9%**
+---
 
-$$\text{Relative WAPE Reduction} = \frac{29.2454\% - 22.5481\%}{29.2454\%} \approx 22.90\%$$
+## Feature Engineering
 
-### Recursive Multi-Step Forecasting
-At inference time, managers require multi-day projections (7, 14, or 30 days). The system employs a recursive multi-step forecasting engine:
+The production feature matrix comprises **19 structured features**:
 
-1. Step 1 ($t+1$) is predicted using true historical sales.
-2. For step $k$ ($t+k$), predicted sales from steps $t+1 \dots t+k-1$ are dynamically fed back into the feature matrix to update `lag_1`, rolling means, and rolling standard deviations.
-3. Exogenous calendar signals (`day_of_week`, `week_of_year`, `month_num`) increment deterministically along the forecast horizon.
-4. *Scope assumption:* Future sell prices are carried forward from the latest available observation. Future holiday event flags and SNAP indicators are sourced from the known M5 future calendar (`data/raw/calendar.csv`), with a fallback to the latest historical values if a date is unavailable.
+| Feature Category | Features | Description |
+| :--- | :--- | :--- |
+| **Autoregressive Lags** | `lag_1`, `lag_7`, `lag_14`, `lag_28` | Captures immediate prior-day demand, weekly seasonality, bi-weekly recurrence, and 4-week periodicity. |
+| **Rolling Window Statistics** | `rolling_mean_7`, `rolling_mean_14`, `rolling_mean_28`<br/>`rolling_std_7`, `rolling_std_14`, `rolling_std_28` | Trailing demand levels and volatility. Standard deviations computed with sample variance (`ddof=1`) matching inference logic. |
+| **Calendar Seasonality** | `day_of_week`, `month_num`, `year_num`, `week_of_year` | Captures intra-week shopping patterns and annual cyclicality. |
+| **Exogenous Signals** | `event_flag`, `snap_CA`, `snap_TX`, `snap_WI`, `sell_price` | Binary holiday indicator, state-specific SNAP purchase windows, and item shelf price. |
 
-## 7. Model Explainability
+---
 
-Feature attribution was computed on the validation split using TreeSHAP (`reports/xgboost_shap_feature_importance.csv`):
+## Forecasting Engine
 
-| Feature | Mean |SHAP Value| | Role in Demand Generation |
-| :--- | :---: | :--- |
-| `lag_1` | **8.6712** | Immediate prior-day demand persistence |
-| `rolling_mean_7` | **5.6651** | Trailing weekly baseline volume |
-| `day_of_week` | **4.2068** | Weekend vs. weekday traffic surges |
-| `rolling_mean_28` | **1.2351** | Long-term monthly trend level |
-| `lag_28` | **1.1194** | Monthly seasonal recurrence |
-| `lag_14` | **1.0583** | Bi-weekly cyclical pattern |
-| `lag_7` | **0.9524** | Same-day prior-week baseline |
+Inference supports multi-step planning horizons of **7, 14, or 30 days**:
 
-SHAP analysis confirms that predictions are predominantly anchored in short-term autoregressive signals (`lag_1`), trailing weekly momentum (`rolling_mean_7`), and weekly day-of-week seasonality. (Note: SHAP reflects statistical feature contributions within the validation sample and does not assert direct real-world causal mechanisms.)
+1. **Step 1 ($t+1$):** Predicted using true historical sales observations.
+2. **Recursive Autoregression ($t+k$):** For steps $k \ge 2$, model predictions from prior steps ($t+1 \dots t+k-1$) dynamically populate `lag_1`, rolling means, and rolling standard deviations.
+3. **Exogenous Calendar Integration:** Future dates deterministically increment calendar attributes (`day_of_week`, `month_num`, `week_of_year`). Future `event_flag` and state SNAP indicators are looked up from the packaged `calendar.csv` file (with graceful fallback to latest historical values if unmapped).
+4. **Price Carryover:** Future `sell_price` values are carried forward from the latest available historical observation.
 
-## 8. Inventory Intelligence
+---
 
-### Replenishment Policy & Order Sizing
-Statistical forecasts are translated into procurement recommendations using a safety-stock-augmented reorder policy:
+## Inventory Intelligence
+
+The inventory decision layer translates statistical demand forecasts into operational procurement recommendations:
 
 $$\text{Recommended Order} = \max\left(0, \, \text{Forecast Demand} + \text{Safety Stock} - \text{Available Inventory}\right)$$
 
-In this MVP implementation, safety stock is configured as a 20% demand buffer:
+In this MVP policy, safety stock is formulated as a 20% demand buffer:
 
-$$\text{Safety Stock} = \text{Forecast Demand} \times 0.20$$
+$$\text{Safety Stock} = 0.20 \times \text{Forecast Demand}$$
 $$\text{Recommended Order} = \max\left(0, \, 1.20 \times \text{Forecast Demand} - \text{Available Inventory}\right)$$
 
-### Decision-Time Simulation Results
-To evaluate practical operational effectiveness, a closed-loop simulation was executed over the 28-day validation window across all 50 series (`reports/inventory_simulation_decision_time.csv`):
-
-- **Simulation cadence:** Reorder decisions made every 7 days using strictly data available prior to decision time.
-- **Strategies compared:** 7-day Moving Average heuristic vs. XGBoost Recursive Forecaster.
-- **Parameters:** Uniform 1.20 inventory buffer, unit holding cost = 0.10, unit stockout penalty cost = 2.00.
-
-| Metric | Baseline Strategy (7-day MA) | Forecast-Driven Strategy (XGBoost) | Operational Impact |
-| :--- | :---: | :---: | :--- |
-| **Stockout Rate** | 9.00% | **3.50%** | **-5.50 pp** (61.1% relative reduction) |
-| **Service Level** | 91.00% | **96.50%** | **+5.50 pp** improvement |
-| **Average Excess Inventory** | **52.61** | 61.52 | +8.91 units buffer expansion |
-| **Inventory-Related Cost** | 14.13 | **11.87** | **-16.0%** relative cost reduction |
-
-**Simulation Interpretation:** By dynamically adapting to upcoming peaks and troughs rather than lagging behind them, the forecast-driven strategy strategically increased average buffer inventory during high-risk periods. This eliminated more than 60% of stockout events, raising service levels from 91% to 96.5% and achieving a net 16.0% cost reduction under the asymmetric holding-versus-stockout cost structure.
-
-### Concrete Verified Example
-For Store `CA_1`, Item `FOODS_3_090`, with 50 units of available inventory over a 7-day horizon:
-
-- **Recursive Daily Predictions:**
-  - 2016-04-25: 38.82 units
-  - 2016-04-26: 40.61 units
-  - 2016-04-27: 39.90 units
-  - 2016-04-28: 43.45 units
-  - 2016-04-29: 60.70 units
-  - 2016-04-30: 72.61 units
-  - 2016-05-01: 67.67 units
+### Concrete Example (Verified Production Output)
+- **Store:** `CA_1` | **Item:** `FOODS_3_090` | **Horizon:** 7 Days | **Available Inventory:** 100 units
+- **Daily Forecasts:**
+  - Day 1 (2016-04-25): 38.82 units
+  - Day 2 (2016-04-26): 40.61 units
+  - Day 3 (2016-04-27): 39.90 units
+  - Day 4 (2016-04-28): 43.45 units
+  - Day 5 (2016-04-29): 60.70 units
+  - Day 6 (2016-04-30): 72.61 units
+  - Day 7 (2016-05-01): 67.67 units
 - **Total Forecast Demand:** 363.77 units
 - **Safety Stock (20%):** 72.75 units
-- **Recommended Order:** **336.53 units** ($363.77 + 72.75 - 100.00 = 336.53$ with 100 units available)
+- **Target Inventory:** $363.77 + 72.75 = 436.52$ units
+- **Recommended Order:** $\max(0, \, 436.52 - 100.00) = \mathbf{336.53\text{ units}}$
 
-## 9. Benchmark Results
+---
 
-### Model Forecasting Accuracy (28-Day Holdout)
-| Model | MAE | RMSE | WAPE | Relative WAPE vs. Best Baseline |
-| :--- | :---: | :---: | :---: | :---: |
-| Naive | 12.1736 | 19.0373 | 31.6437% | +8.20% |
-| Seasonal Naive | 11.6086 | 18.0619 | 30.1751% | +3.18% |
-| Moving Average (7-day) | 11.2509 | 16.4727 | 29.2454% | Baseline (0.00%) |
-| **XGBoost Regressor** | **8.6744** | **12.6023** | **22.5481%** | **-22.90%** |
+## Business Simulation
 
-### Decision-Time Operational Simulation
-| Strategy | Stockout Rate | Service Level | Avg. Excess Inventory | Total Simulation Cost |
-| :--- | :---: | :---: | :---: | :---: |
-| Moving Average Baseline | 9.00% | 91.00% | 52.61 units | 14.13 |
-| **Forecast-Driven (XGBoost)** | **3.50%** | **96.50%** | **61.52 units** | **11.87** |
+The decision-time periodic-review simulation models four consecutive 7-day review cycles over the 28-day validation window across all 50 series:
 
-## 10. Frontend Dashboard
+- **Order Timing:** Decisions occur strictly at decision boundaries ($t=0, 7, 14, 21$) using only data available prior to the decision timestamp.
+- **Cost Formulation:** Total inventory penalty cost is modeled as:
+  $$\text{Cost} = (0.10 \times \text{Excess Inventory}) + (2.00 \times \text{Unmet Demand Units})$$
 
-The operational dashboard is built with **Next.js (App Router), TypeScript, Tailwind CSS, shadcn/ui, and Recharts**. It provides supply-chain planners with store and SKU selection, configurable inventory inputs, forecast horizon toggles (7, 14, or 30 days), KPI summary cards, demand trend alerts, and interactive daily projections.
+### Simulation Outcomes
+- **Stockout Rate:** Reduced from **9.00% to 3.50%** (a 61.1% relative reduction).
+- **Service Level:** Increased from **91.00% to 96.50%** (+5.50 percentage points).
+- **Average Excess Inventory:** Increased moderately from 52.61 to 61.52 units (+8.91 units) as the model proactively buffers ahead of anticipated weekend and event demand spikes.
+- **Net Inventory Cost:** Decreased from **14.13 to 11.87** (a **16.00% net cost reduction**) due to the 20:1 asymmetric penalty ratio of stockouts versus inventory holding.
 
-### 7-Day Forecast Dashboard
+---
 
-![7-day demand forecast and inventory recommendation](docs/images/dashboard-7-day-forecast.png)
+## Model Explainability
 
-### 14-Day Forecast Dashboard
+Feature importance was evaluated using TreeSHAP on validation holdout samples ([`reports/xgboost_shap_feature_importance.csv`](reports/xgboost_shap_feature_importance.csv)):
 
-![14-day demand forecast and inventory recommendation](docs/images/dashboard-14-day-forecast.png)
+| Rank | Feature | Mean Absolute SHAP Value | Operational Interpretation |
+| :---: | :--- | :---: | :--- |
+| **1** | `lag_1` | **8.6712** | Prior-day sales volume is the strongest driver of next-day demand level. |
+| **2** | `rolling_mean_7` | **5.6651** | Trailing weekly average captures short-term baseline volume trends. |
+| **3** | `day_of_week` | **4.2068** | Captures distinct weekday versus weekend traffic surges. |
+| **4** | `rolling_mean_28` | **1.2351** | Long-term 4-week trend level dampens high-frequency variance. |
+| **5** | `lag_28` | **1.1194** | Monthly seasonality captures payday and monthly recurring cycles. |
 
-## 11. API Specification
+![SHAP Feature Importance](reports/figures/shap_feature_importance.png)
 
-The inference backend is implemented using **FastAPI** and served via Uvicorn.
+> [!NOTE]
+> SHAP measures statistical feature importance within the validation sample and does not assert real-world causal relationships.
 
-### Health Check
+---
+
+## MLOps & Model Governance
+
+The repository implements a deterministic champion/challenger deployment pipeline:
+
+```mermaid
+flowchart TD
+    CAND["Candidate Model Trained<br/>MLflow Run Logged"] --> RETRIEVE["Retrieve Candidate Metrics<br/>MAE, RMSE, WAPE"]
+    RETRIEVE --> CHAMP["Query Active Champion<br/>Model Registry @champion alias"]
+    CHAMP --> GATE{"Model Quality Gate<br/>1. Beats Baseline WAPE (0.2925)?<br/>2. Matches/Beats Champion WAPE?<br/>3. WAPE &le; 0.2500 &amp; MAE &le; 10.00?"}
+    GATE -- "Fail" --> REJECT["REJECT<br/>Runtime champion untouched<br/>Audit trail logged"]
+    GATE -- "Pass" --> REG["Register New Version<br/>DemandForecasterXGBoost"]
+    REG --> SWAP["Atomic Filesystem Swap<br/>POSIX os.replace on runtime JSON"]
+    SWAP --> ALIAS["Update MLflow Alias<br/>Assign @champion to New Version"]
+    ALIAS --> PROMOTED["PROMOTED<br/>Active Runtime Champion: v3"]
+```
+
+- **Fail-Closed Gate:** If MLflow is unavailable, metrics are invalid, or guardrails are breached, candidate promotion immediately aborts and the runtime model remains untouched.
+- **Atomic Replacement:** The runtime file (`models/demand_forecaster_xgboost.json`) is staged in a temporary file and atomically swapped using POSIX `os.replace` to prevent race conditions or corrupted reads.
+- **Active Champion:** Model `DemandForecasterXGBoost` version **3** is the current champion under alias `@champion` (training run `4183d9a6ae91402da1c7814502c53fb7` initial promotion; candidate `4df4aa9f91154423b0ab1baa3728b56d` promoted to v3).
+- **Runtime Serving:** The FastAPI application serves from the promoted local JSON artifact rather than executing network queries against MLflow on each inference request.
+
+---
+
+## API Specification
+
+The backend service is built with **FastAPI** and served via Uvicorn.
+
+### 1. Health Check
 - **Endpoint:** `GET /health`
 - **Response:**
   ```json
@@ -243,177 +261,244 @@ The inference backend is implemented using **FastAPI** and served via Uvicorn.
   }
   ```
 
-### Forecast & Recommendation
+### 2. Demand Forecast & Inventory Recommendation
 - **Endpoint:** `POST /forecast`
-- **Request:**
+- **Request Body:**
   ```json
   {
     "store_id": "CA_1",
     "item_id": "FOODS_3_090",
-    "available_inventory": 50,
+    "available_inventory": 100,
     "forecast_days": 7
   }
   ```
-- **Response:**
+  *(Supported `forecast_days`: `7`, `14`, or `30`)*
+
+- **Response Body (HTTP 200):**
   ```json
   {
     "store_id": "CA_1",
     "item_id": "FOODS_3_090",
     "forecast_days": 7,
     "daily_forecast": [
-      {"date": "2016-04-25", "forecast": 38.866458892822266},
-      {"date": "2016-04-26", "forecast": 40.85276794433594},
-      {"date": "2016-04-27", "forecast": 40.05023193359375},
-      {"date": "2016-04-28", "forecast": 43.796329498291016},
-      {"date": "2016-04-29", "forecast": 60.98594665527344},
-      {"date": "2016-04-30", "forecast": 71.74065399169922},
-      {"date": "2016-05-01", "forecast": 63.79021072387695}
+      {"date": "2016-04-25", "forecast": 38.82372283935547},
+      {"date": "2016-04-26", "forecast": 40.61270523071289},
+      {"date": "2016-04-27", "forecast": 39.903804779052734},
+      {"date": "2016-04-28", "forecast": 43.446739196777344},
+      {"date": "2016-04-29", "forecast": 60.702064514160156},
+      {"date": "2016-04-30", "forecast": 72.61231231689453},
+      {"date": "2016-05-01", "forecast": 67.67041015625}
     ],
     "inventory": {
-      "forecast_demand": 360.08,
-      "available_inventory": 50.0,
-      "safety_stock": 72.02,
-      "recommended_order": 382.1
+      "forecast_demand": 363.77,
+      "available_inventory": 100.0,
+      "safety_stock": 72.75,
+      "recommended_order": 336.53
     }
   }
   ```
 
-## 12. MLOps & Reproducibility
+---
 
-- **Experiment Tracking:** MLflow tracks training metrics, validation MAE/RMSE/WAPE, and hyperparameter dictionaries under experiment `demand-forecasting-xgboost`.
-- **Model Registry & Quality Gate:** `DemandForecasterXGBoost` is managed through the MLflow Model Registry using the `champion` alias. Model promotion is automated via an isolated Model Quality Gate that compares candidate metrics against baseline benchmarks, current champion performance, and guardrails before promoting (latest validated promotion: version 3).
-- **Containerization:** Containerized FastAPI and Next.js services with isolated runtime environments. The backend image packages `data/processed/model_data.parquet`, `models/demand_forecaster_xgboost.json`, and `data/raw/calendar.csv` for future calendar event and SNAP lookups during recursive inference.
-- **Dependency Isolation:** Strict separation between development (`requirements-dev.txt`) and production deployment (`requirements-prod.txt`).
-- **Data Integrity:** Strict temporal cutoffs prevent leakage during feature generation and recursive inference. Top-50 series selection is based exclusively on training-period data (prior to the 28-day validation window).
-- **Startup Caching:** The FastAPI application pre-warms model, processed data, and calendar lookup on startup via `lifespan` and `@lru_cache`, eliminating per-request disk I/O and model parsing overhead.
+## Operations Dashboard
 
-## 13. Limitations & Production Scope
+The dashboard is built with **Next.js (App Router), TypeScript, Tailwind CSS, shadcn/ui, and Recharts**. Planners can select store/SKU combinations, adjust available inventory, toggle planning horizons, view KPI summary cards, and inspect interactive daily demand forecasts.
 
-To maintain rigorous engineering honesty, the following MVP design boundaries should be noted:
+### 7-Day Planning Horizon
+![7-Day Demand Forecast Dashboard](docs/images/dashboard-7-day-forecast.png)
 
-1. **Modeling Scope:** The current pipeline trains and evaluates on the top 50 high-volume store-item series. It is not currently deployed across all 30,490 series in the complete M5 hierarchical dataset.
-2. **Series Selection:** Top-50 series selection is based strictly on training-period sales totals (prior to the 28-day validation cutoff), preventing information leakage from the validation period into the cohort selection step.
-3. **Validation Methodology:** XGBoost validation metrics (MAE, RMSE, WAPE) reflect **teacher-forced 1-step-ahead** predictions on the 28-day holdout. Production multi-day forecasts use **recursive multi-step** inference, where each prior step's prediction feeds subsequent feature windows. These are different evaluation regimes; recursive accuracy will generally be lower than teacher-forced accuracy.
-4. **Heuristic Safety Stock:** Safety stock is calculated using a fixed 20% demand percentage heuristic rather than a full stochastic replenishment optimizer (e.g., dynamic lead-time variance modeling or $(s, S)$ continuous-review policies).
-5. **Exogenous Variable Handling:** In recursive multi-step forecasting, **future sell prices are carried forward** from the latest known value. **Future event flags and SNAP indicators** use actual known M5 calendar values from `data/raw/calendar.csv` (packaged in the Docker image). A graceful fallback to the latest historical values is applied if a forecast date is not present in the calendar.
-6. **Rolling Standard Deviation:** Both training feature engineering (`pandas rolling().std()`) and inference (`numpy array.std(ddof=1)`) use consistent `ddof=1` (sample standard deviation) for train-serving consistency.
-7. **Simulation Boundaries:** The inventory simulation demonstrates policy behavior under explicit, fixed holding cost (0.10) and stockout penalty (2.00) parameters. It should be understood as an **offline periodic-review inventory policy simulation**, not a measured empirical business impact from live production retail deployment.
+### 14-Day Planning Horizon
+![14-Day Demand Forecast Dashboard](docs/images/dashboard-14-day-forecast.png)
 
-## 14. Project Structure
+---
+
+## Production Deployment
+
+- **Live Demo Frontend:** [https://demand-forecasting-inventory-intell.vercel.app/](https://demand-forecasting-inventory-intell.vercel.app/)
+- **Production Backend API:** `http://3.80.207.155:8000` (AWS EC2, Amazon Linux 2023, ARM64 `t4g.small`)
+- **Container Architecture:** Backend Docker image packages `requirements-prod.txt`, `model_data.parquet`, `demand_forecaster_xgboost.json`, and `calendar.csv`.
+- **Security & Proxy:** The frontend uses a server-side Next.js route proxy (`/api/forecast`) that communicates with the EC2 backend via environment variable `BACKEND_API_URL`, preventing browser-side mixed-content and CORS issues.
+
+---
+
+## Project Structure
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # GitHub Actions pipeline (Python CI + Frontend CI)
 ├── data/
-│   ├── raw/                  # Downloaded Kaggle M5 CSVs (gitignored)
-│   └── processed/            # Processed modeling parquet tables (gitignored)
+│   ├── raw/
+│   │   ├── calendar.csv       # M5 calendar & SNAP indicator lookup (tracked in git)
+│   │   ├── sales_train_validation.csv # (gitignored)
+│   │   └── sell_prices.csv    # (gitignored)
+│   └── processed/
+│       ├── m5_sales_long.parquet # Cleaned long-format table (gitignored)
+│       └── model_data.parquet    # Feature matrix for 50 series (gitignored)
 ├── docs/
-│   └── images/               # Dashboard screenshots
-├── frontend/
+│   └── images/                # Dashboard application screenshots
+│       ├── dashboard-7-day-forecast.png
+│       └── dashboard-14-day-forecast.png
+├── frontend/                  # Next.js 16 App Router application
 │   ├── src/
-│   │   ├── app/              # Next.js App Router (page.tsx, layout.tsx)
-│   │   └── components/       # shadcn/ui and custom dashboard components
-│   ├── Dockerfile            # Frontend container specification
+│   │   ├── app/
+│   │   │   ├── api/forecast/route.ts # Server-side API proxy
+│   │   │   └── page.tsx              # Operations dashboard UI
+│   │   └── components/               # shadcn/ui and custom widgets
+│   ├── Dockerfile
 │   └── package.json
-├── models/                   # Serialized model artifacts (gitignored)
+├── models/
+│   └── demand_forecaster_xgboost.json # Promoted champion runtime artifact
 ├── reports/
-│   ├── figures/              # Evaluation plots & create_evaluation_figures.py
-│   ├── baseline_results.csv  # Verified baseline metrics
+│   ├── figures/               # Evaluation plots and generation script
+│   │   ├── baseline_vs_xgboost_wape.png
+│   │   ├── inventory_simulation_kpis.png
+│   │   └── shap_feature_importance.png
+│   ├── baseline_results.csv   # Verified baseline benchmark metrics
 │   ├── inventory_simulation_decision_time.csv # Verified simulation metrics
 │   └── xgboost_shap_feature_importance.csv    # Verified SHAP metrics
 ├── src/
-│   ├── api.py                # FastAPI REST endpoints
-│   ├── data/                 # Wide-to-long transformation & preprocessing
-│   ├── evaluation/           # Baselines, simulation, and SHAP explainability
-│   ├── features/             # Time-series feature engineering pipeline
-│   ├── inference/            # Recursive multi-step forecaster
-│   ├── inventory/            # Replenishment & safety stock recommendation
-│   └── models/               # Model training scripts (train_xgboost.py, train_model.py)
-├── Dockerfile                # Backend container specification
-├── docker-compose.yml        # Full-stack container orchestration
-├── requirements-dev.txt      # Development dependencies
-├── requirements-prod.txt     # Production dependencies
+│   ├── api.py                 # FastAPI REST application with lifespan caching
+│   ├── data/                  # Data ingestion and wide-to-long transformation
+│   ├── evaluation/            # Baselines, simulation, SHAP, and promotion logic
+│   │   ├── baselines.py
+│   │   ├── explain_xgboost.py
+│   │   ├── inventory_simulation.py
+│   │   ├── promotion.py
+│   │   └── quality_gate.py
+│   ├── features/              # Leakage-free time-series feature pipeline
+│   │   └── build_features.py
+│   ├── inference/             # Recursive autoregressive multi-step forecaster
+│   │   └── forecast.py
+│   ├── inventory/             # Safety stock & replenishment calculation
+│   │   └── inventory_recommendation.py
+│   └── models/                # XGBoost training and MLflow promotion runner
+│       └── train_xgboost.py
+├── tests/                     # 84 unit and regression tests
+│   ├── test_api.py
+│   ├── test_features.py
+│   ├── test_forecast.py
+│   ├── test_inventory.py
+│   ├── test_inventory_simulation.py
+│   ├── test_model_promotion.py
+│   └── test_quality_gate.py
+├── Dockerfile                 # Production backend container spec
+├── docker-compose.yml         # Full-stack container orchestration
+├── requirements-dev.txt       # Development & training dependencies
+├── requirements-prod.txt      # Lightweight production serving dependencies
 └── README.md
 ```
 
-## 15. How to Run & Reproduce
+---
 
-### Data & Model Artifact Reproduction Sequence
-The raw Walmart M5 dataset, processed parquet tables, and trained model artifacts are excluded from git version control due to dataset licensing and file size constraints (~1 GB raw, ~2.9 MB model). Because the backend Docker container directly packages `data/processed/model_data.parquet` and `models/demand_forecaster_xgboost.json`, these artifacts must be generated locally prior to building Docker images.
+## Local Setup & Reproduction
 
-#### Step 1: Raw M5 Dataset Download
-Download the competition files from [Kaggle M5 Forecasting – Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) and place the following three CSVs into `data/raw/`:
-- `data/raw/calendar.csv`
-- `data/raw/sales_train_validation.csv`
-- `data/raw/sell_prices.csv`
+### Prerequisites
+- Python 3.11
+- Node.js 22+ and npm
+- Docker and Docker Compose (optional for containerized execution)
 
-#### Step 2: Environment Setup
+### 1. Repository Setup
 ```bash
+git clone https://github.com/irishz12/Demand-Forecasting-Inventory-Intelligence.git
+cd Demand-Forecasting-Inventory-Intelligence
+
 # Create and activate virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install development and training dependencies
+# Install development dependencies
 pip install -r requirements-dev.txt
 ```
 
-#### Step 3: Data Transformation & Feature Engineering
-Run the repository pipelines to generate the processed parquet tables:
+### 2. Running Automated Tests
 ```bash
-# 1. Unpivot daily sales, join calendar and prices -> outputs data/processed/m5_sales_long.parquet
-python -m src.data.prepare_data
-
-# 2. Filter top 50 series, generate autoregressive lags & rolling stats -> outputs data/processed/model_data.parquet
-python -m src.features.build_features
-```
-
-#### Step 4: Model Training & Quality Gate Promotion
-Execute the XGBoost training pipeline to train the model, evaluate against the Quality Gate, and register the runtime artifact:
-```bash
-python -m src.models.train_xgboost
-```
-This script trains the model on the 28-day temporal validation holdout, logs parameters and metrics to MLflow (`sqlite:///mlflow.db`), evaluates candidate metrics through the Model Quality Gate against the `@champion` alias and guardrails, and upon passing (`PROMOTE`), atomically saves `models/demand_forecaster_xgboost.json` and updates the `champion` alias.
-
-> [!NOTE]
-> **Fresh Clone / Initial Seeding:** On a completely new clone where `mlflow.db` is initialized from scratch with no prior runs, the Model Quality Gate safely evaluates the first model version against the baseline and guardrails, promoting it to version 1 with the `champion` alias.
-
----
-
-### Running with Docker Compose
-Once `data/processed/model_data.parquet` and `models/demand_forecaster_xgboost.json` have been generated, the complete multi-service application (FastAPI backend + Next.js frontend) can be built and launched via Docker Compose:
-
-```bash
-docker compose up --build
-```
-*(or `docker-compose up --build`)*
-
-- **Web Operations Dashboard:** [http://localhost:3000](http://localhost:3000)
-- **FastAPI REST Endpoint:** [http://localhost:8000](http://localhost:8000)
-- **Interactive Swagger Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
-### Local Development Setup
-
-#### 1. Backend Server
-```bash
-uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
-```
-
-#### 2. Frontend Development Server
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-#### 3. Running Automated Tests
-```bash
-# Run full unit and quality gate test suite (84 tests)
+# Execute the full 84-test Python test suite
 python -m unittest discover -s tests -v
 ```
 
-#### 4. Reproducing Evaluation Figures
-To regenerate evaluation charts from the verified reports:
+### 3. Local Development Servers
+**Backend:**
 ```bash
-python reports/figures/create_evaluation_figures.py
+# Start FastAPI backend on port 8000
+uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+**Frontend:**
+```bash
+# In a separate terminal:
+cd frontend
+npm install
+npm run dev
+# Dashboard accessible at http://localhost:3000
+```
+
+### 4. Running with Docker Compose
+To launch both services in connected containers:
+```bash
+docker compose up --build
+```
+- **Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **API Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## Testing & Continuous Integration
+
+The repository maintains an automated test suite across **84 unit and regression tests**:
+
+| Test Module | Test Count | Scope |
+| :--- | :---: | :--- |
+| `tests/test_api.py` | 13 | Request validation, Pydantic constraints, `/health` and `/forecast` route handling. |
+| `tests/test_features.py` | 2 | Regression tests verifying pre-validation series selection without temporal leakage. |
+| `tests/test_forecast.py` | 8 | Feature column contracts, rolling std sample variance (`ddof=1`), calendar lookup, fallback handling. |
+| `tests/test_inventory.py` | 15 | Safety stock formulas, boundary conditions, zero-demand and negative inventory handling. |
+| `tests/test_inventory_simulation.py` | 1 | Regression test verifying decision-date deduplication during weekly history rollover. |
+| `tests/test_model_promotion.py` | 17 | Atomic replacement, fail-closed MLflow resolution, alias assignment, rollback prevention. |
+| `tests/test_quality_gate.py` | 28 | Pure deterministic gate checks, guardrail threshold boundaries, malformed metric rejection. |
+
+**GitHub Actions CI (`.github/workflows/ci.yml`):**
+- **Python CI:** Installs production dependencies, validates core module imports, and executes all 84 tests.
+- **Frontend CI:** Installs npm dependencies, runs ESLint, and compiles the Next.js production build (`next build`).
+
+---
+
+## Known Limitations
+
+1. **Modeling Cohort Scope:** Models the top 50 high-volume store-item series rather than all 30,490 series in the complete M5 dataset.
+2. **Validation Evaluation Regime:** The 22.55% WAPE is measured using 1-step teacher-forced validation on historical actuals. Recursive multi-step forecasts in live deployment compound autoregressive error over 7, 14, and 30-day horizons.
+3. **Inventory Heuristic:** Safety stock uses a configured 20% demand percentage heuristic rather than a dynamic stochastic inventory optimization solver (e.g., continuous review $(s, S)$ policies or lead-time variance modeling).
+4. **Price Carryover:** Future selling prices are carried forward from the latest observed price rather than modeled via dynamic pricing elasticity.
+5. **Autoregressive Compounding:** Forecast variance increases over longer horizons (14 and 30 days) as predictions feed subsequent lag and rolling calculations.
+6. **Decoupled Runtime:** The production container serves from a validated local JSON model artifact rather than querying the MLflow Model Registry dynamically on every HTTP request.
+
+---
+
+## Future Improvements
+
+- **Scale Coverage:** Expand feature extraction and partitioned training across all store-item categories.
+- **Dynamic Price & Promotion Modeling:** Ingest external planned promotional calendars and price elasticity curves.
+- **Probabilistic Forecasting:** Implement quantile loss objectives to produce predictive intervals ($P_{10}, P_{50}, P_{90}$) directly supporting service-level safety stocks.
+- **Multi-Horizon Validation:** Implement backtesting on recursive multi-step forecasts (7, 14, 30 days) alongside teacher-forced 1-step validation.
+- **Stochastic Inventory Policies:** Incorporate supplier lead-time distribution modeling and order batch constraints.
+- **Drift Detection:** Automate feature distribution and prediction drift tracking in production.
+
+---
+
+## Tech Stack
+
+| Domain | Technologies |
+| :--- | :--- |
+| **Machine Learning** | XGBoost, scikit-learn, SHAP, NumPy, pandas |
+| **Data Processing** | pyarrow, Parquet |
+| **MLOps & Tracking** | MLflow, Custom Quality Gate Orchestrator, GitHub Actions |
+| **Backend Serving** | FastAPI, Uvicorn, Pydantic |
+| **Frontend UI** | Next.js 16 (App Router), TypeScript, Tailwind CSS v4, shadcn/ui, Recharts |
+| **Infrastructure** | Docker, Docker Compose, AWS EC2 (Amazon Linux 2023, ARM64), Vercel |
+
+---
+
+## License
+
+This repository does not currently specify an open-source license. All rights are reserved by the repository owner.
